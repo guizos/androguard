@@ -1,4 +1,6 @@
-# Androguard
+# Androguard-ACID
+
+Androguard version with additions used for ACID project - http://acidproject.org.uk/
 
 ## Features
 
