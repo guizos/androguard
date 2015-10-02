@@ -11,7 +11,4 @@ from androguard.core.bytecodes import apk
 # in the same method.
 
 def get_permissions(apk):
-    #print "*********"+name+"*********"
-    permissions = Set()
-    permissions = [ ("'%s'",x) for x in apk.get_permissions() ]
-    return permissions
+    return apk.get_permissions()

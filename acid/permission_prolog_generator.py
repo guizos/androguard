@@ -24,7 +24,7 @@ if mode==0:
     a = apk.APK( file+extension )
     permissions = permission_detector.get_permissions(a)
     for p in permissions:
-        print "recv('"+a.get_package()+"','"+p+"')."
+        print "uses('"+a.get_package()+"','"+p+"')."
     #except:
     #    print "--Error with file "+file
 elif mode== 1:
@@ -36,6 +36,6 @@ elif mode== 1:
             j = dvm.DalvikVMFormat( a.get_dex() )
             permissions = permission_detector.get_permissions(a)
             for p in permissions:
-                print "recv('"+a.get_package()+"','"+p+"')."
+                print "uses('"+a.get_package()+"','"+p+"')."
         except:
             pass
