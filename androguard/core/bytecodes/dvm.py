@@ -2889,7 +2889,7 @@ class EncodedMethod(object):
 
             :rtype: an :class:`Instruction` object
         """
-        if self._code != None:
+        if self.code != None:
             return self.code.get_bc().get_instruction(idx, off)
         return None
 
@@ -7288,10 +7288,10 @@ class DalvikVMFormat(bytecode._Bytecode):
             self.api_version = using_api
         else:
             self.api_version = CONF["DEFAULT_API"]
-            
-        #TODO: can using_api be added to config parameter?    
+
+        #TODO: can using_api be added to config parameter?
         super(DalvikVMFormat, self).__init__(buff)
-        
+
         self.config = config
         if not self.config:
           self.config = {"RECODE_ASCII_STRING": CONF["RECODE_ASCII_STRING"],
@@ -7332,11 +7332,11 @@ class DalvikVMFormat(bytecode._Bytecode):
         '''
             This method returns api version that should be used for loading api
             specific resources.
-            
+
             :rtype: int
         '''
         return self.api_version
-    
+
     def get_classes_def_item(self):
         """
             This function returns the class def item
