@@ -15,11 +15,18 @@ def trans_shared_prefs_same_package(name,dalvik,apk,add_package):
     channels = Set()
     for m in dalvik.get_methods():
         for index,i in enumerate(m.get_instructions()):
-            if (i.get_op_value()==0x6E) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
+            if (i.get_op_value() in [0x6E, 0x74]) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
                 if ("getSharedPreferences" in i.get_output()):
                     if(not is_create_package_context_present(m,index-1)):
                         if(edit_is_present_later(m,index)):
-                            new_var = i.get_output().split(",")[1].strip()
+                            new_var = ""
+                            if i.get_op_value() == 0x6E:
+                                new_var = i.get_output().split(",")[1].strip()
+                            elif i.get_op_value() == 0x74:
+                                new_var = i.get_output().split(",")[0].split("...")[1].strip()[1:]
+                                num = int(new_var)-1
+                                #print num
+                                new_var = "v"+`num`
                             pref_file = acidutils.track_string_value(m,index-1,new_var)
                             package = apk.get_package()
                             if(pref_file!=""):
@@ -35,7 +42,7 @@ def trans_shared_prefs_other_package(name,dalvik,apk,add_package):
     channels = Set()
     for m in dalvik.get_methods():
         for index,i in enumerate(m.get_instructions()):
-            if (i.get_op_value()==0x6E) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
+            if (i.get_op_value() in [0x6E, 0x74]) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
                 if ("createPackageContext" in i.get_output()):
                     if(edit_is_present_later(m,index)):
                         var = i.get_output().split(",")[2].strip()
