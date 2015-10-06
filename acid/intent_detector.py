@@ -12,7 +12,7 @@ from androguard.core.analysis import analysis, ganalysis
 # Only detects those broadcast intents that are directly defined by constant string
 # in the same method.
 
-def trans_broadcast_intents(name,dalvik):
+def trans_broadcast_intents(dalvik):
     #print "*********"+name+"*********"
     channels = Set()
     found = 0
@@ -65,7 +65,7 @@ def track_method_call_action(method, index, intent_variable):
         index = index - 1
     return action
 
-def recv_static_receiver_intents(name,apk_object):
+def recv_static_receiver_intents(apk_object):
     channels = Set()
     manifest = apk_object.get_AndroidManifest()
     receiver_list = manifest.getElementsByTagName('receiver')
@@ -78,7 +78,7 @@ def recv_static_receiver_intents(name,apk_object):
                     channels.add("i_"+val.value)
     return channels
 
-def recv_dynamic_receiver_intents(name,dalvik):
+def recv_dynamic_receiver_intents(dalvik):
     channels = Set()
     found = 0
     for m in dalvik.get_methods():

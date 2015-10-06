@@ -32,8 +32,8 @@ if mode==0:
     file  =  sys.argv[2]
     a = apk.APK( file+extension )
     j = dvm.DalvikVMFormat( a.get_dex() )
-    channels = intent_detector.recv_static_receiver_intents(ntpath.basename(file),a)
-    channels = channels.union(intent_detector.recv_dynamic_receiver_intents(ntpath.basename(file),j))
+    channels = intent_detector.recv_static_receiver_intents(a)
+    channels = channels.union(intent_detector.recv_dynamic_receiver_intents(j))
     for channel in channels:
         print "recv('"+a.get_package()+"','"+channel+"')."
 elif mode== 1:
@@ -43,8 +43,8 @@ elif mode== 1:
         try:
             a = apk.APK( file )
             j = dvm.DalvikVMFormat( a.get_dex() )
-            channels = intent_detector.recv_static_receiver_intents(ntpath.basename(file),a)
-            channels = channels.union(intent_detector.recv_dynamic_receiver_intents(ntpath.basename(file),j))
+            channels = intent_detector.recv_static_receiver_intents(a)
+            channels = channels.union(intent_detector.recv_dynamic_receiver_intents(j))
             for channel in channels:
                 print "recv('"+a.get_package()+"','"+channel+"')."
         except:

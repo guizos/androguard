@@ -23,7 +23,7 @@ if mode==0:
     try:
         a = apk.APK( file+extension )
         j = dvm.DalvikVMFormat( a.get_dex() )
-        channels = intent_detector.trans_broadcast_intents(ntpath.basename(file),j)
+        channels = intent_detector.trans_broadcast_intents(j)
         for channel in channels:
             print "trans('"+a.get_package()+"','"+channel+"')."
     except:
@@ -35,7 +35,7 @@ elif mode== 1:
         try:
             a = apk.APK( file )
             j = dvm.DalvikVMFormat( a.get_dex() )
-            channels = intent_detector.trans_broadcast_intents(ntpath.basename(file),j)
+            channels = intent_detector.trans_broadcast_intents(j)
             for channel in channels:
                 print "trans('"+a.get_package()+"','"+channel+"')."
         except:
