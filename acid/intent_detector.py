@@ -18,9 +18,13 @@ def trans_broadcast_intents(dalvik):
     found = 0
     for m in dalvik.get_methods():
         for index,i in enumerate(m.get_instructions()):
-            if (i.get_op_value()==110) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
-                if "Landroid/content/Intent;->setAction" in i.get_output():
-                    intent = i.get_output().split(",")[1].strip()
+            if (i.get_op_value() in [110,0x70]) and ("Landroid/support" not in m.get_class_name()):#invoke-virtual
+                intent = ""
+                if "Landroid/content/Intent;-><init>" in i.get_output() or "Landroid/content/Intent;->setAction" in i.get_output():
+                    if (i.get_op_value() == 110) :#invoke-virtual
+                        intent = i.get_output().split(",")[1].strip()
+                    if (i.get_op_value() == 0x70) :#invoke-direct
+                        intent = i.get_output().split(",")[1].strip()
                     back_index = index
                     while back_index > 0:
                         back_index = back_index - 1
@@ -29,7 +33,7 @@ def trans_broadcast_intents(dalvik):
                             action = track_method_call_action(m,back_index,intent)
                             #print "---- Class: "+m.get_class_name()+"-----"
                             #print "---- Method: "+m.get_name()+"-----"
-                            channels.add("i_"+action)
+                            channels.add("i_"+action.strip())
                             #print "trans("+name+","+action+")."
                             back_index = -1
                             found = 1
