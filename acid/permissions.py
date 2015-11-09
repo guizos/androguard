@@ -15,6 +15,9 @@ import fnmatch
 search_folder = sys.argv[1]
 extension = ''
 permissions_dict = {}
+with open("mainpermissions.txt") as f:
+    main_permissions = f.readlines()
+main_permissions = [ x.rstrip() for x in main_permissions]
 permission_set = set()
 permission_matrix = {}
 files = acidutils.get_all_apk_in_dir(search_folder,extension)
@@ -22,6 +25,7 @@ for file in files:
     try:
         a = apk.APK( file )
         permissions = fnmatch.filter(set(permission_detector.get_permissions(a)), 'android.permission.*')
+        permissions = [element for element in permissions if element in main_permissions]
         permissions_dict[a.get_package()] = permissions
         permission_set = permission_set.union(permissions)
         for p in permissions:
