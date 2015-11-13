@@ -102,7 +102,7 @@ class Session(object):
         return dx
 
     def add(self, filename, raw_data, dx=None):
-        ret = is_android_raw(raw_data)
+        ret = androconf.is_android_raw(raw_data)
         if ret:
             self.analyzed_files[filename] = []
             digest = hashlib.sha256(raw_data).hexdigest()
@@ -194,3 +194,7 @@ class Session(object):
                 dx = dex_file[1]
             return a, d, dx
         return None
+
+    def get_objects_dex(self):
+        for digest in self.analyzed_dex:
+            yield self.analyzed_dex[digest]

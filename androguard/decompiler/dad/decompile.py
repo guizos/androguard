@@ -237,10 +237,17 @@ class DvClass(object):
     def process_method(self, num, doAST=False):
         method = self.methods[num]
         if not isinstance(method, DvMethod):
-            method.set_instructions([i for i in method.get_instructions()])
+            # Do not change the instructions if it is already cached in the past
+            cached = True
+            if not method.is_cached_instructions():
+                method.set_instructions([i for i in method.get_instructions()])
+                cached = False
+
             self.methods[num] = DvMethod(self.vma.get_method(method))
             self.methods[num].process(doAST=doAST)
-            method.set_instructions([])
+
+            if not cached:
+                method.set_instructions([])
         else:
             method.process(doAST=doAST)
 
@@ -373,7 +380,7 @@ class DvMachine(object):
         vm = auto_vm(name)
         if vm is None:
             raise ValueError('Format not recognised: %s' % name)
-        self.vma = analysis.uVMAnalysis(vm)
+        self.vma = analysis.newVMAnalysis(vm)
         self.classes = dict((dvclass.get_name(), dvclass)
                             for dvclass in vm.get_classes())
         #util.merge_inner(self.classes)

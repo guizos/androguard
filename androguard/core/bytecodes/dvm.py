@@ -17,8 +17,7 @@
 
 from androguard.core import bytecode
 from androguard.core.bytecodes.apk import APK
-from androguard.core.androconf import CONF, debug, warning, is_android_raw
-from androguard.util import read
+from androguard.core.androconf import CONF, debug, warning
 
 import sys
 import re
@@ -1781,9 +1780,6 @@ class EncodedArrayItem(object):
     def reload(self):
         pass
 
-    def get_value(self):
-        return self.value
-
     def show(self):
         bytecode._PrintSubBanner("Encoded Array Item")
         self.value.show()
@@ -2960,7 +2956,7 @@ class EncodedMethod(object):
         if m_a:
             bytecode._PrintSubBanner("XREF From")
             xrefs_from = m_a.get_xref_from()
-            for ref_class, ref_method in xrefs_from:
+            for ref_class, ref_method, _ in xrefs_from:
                 bytecode._PrintDefault(ref_method)
                 bytecode._PrintDefault('\n')
 
@@ -2968,7 +2964,7 @@ class EncodedMethod(object):
 
             bytecode._PrintSubBanner("XREF To")
             xrefs_to = m_a.get_xref_to()
-            for ref_class, ref_method in xrefs_to:
+            for ref_class, ref_method, _ in xrefs_to:
                 bytecode._PrintDefault(ref_method)
                 bytecode._PrintDefault('\n')
 
@@ -3010,6 +3006,12 @@ class EncodedMethod(object):
           :rtype: :class:`DalvikCode` object
         """
         return self.code
+
+    def is_cached_instructions(self):
+        if self.code == None:
+            return False
+
+        return self.code.get_bc().is_cached_instructions()
 
     def get_instructions(self):
         """
@@ -6437,7 +6439,6 @@ class DCode(object):
 
         self.notes = {}
         self.cached_instructions = []
-        self.rcache = 0
 
         self.idx = 0
 
@@ -6468,6 +6469,11 @@ class DCode(object):
         """
         self.idx = idx
 
+    def is_cached_instructions(self):
+        if self.cached_instructions:
+            return True
+        return False
+
     def set_instructions(self, instructions):
         """
           Set the instructions
@@ -6489,23 +6495,10 @@ class DCode(object):
                 yield i
 
         else:
-            if self.rcache >= 5:
-                lsa = LinearSweepAlgorithm()
-                for i in lsa.get_instructions(self.CM, self.size, self.insn,
-                                              self.idx):
-                    self.cached_instructions.append(i)
-
-                for i in self.cached_instructions:
-                    yield i
-            else:
-                self.rcache += 1
-                if self.size >= 1000:
-                    self.rcache = 5
-
-                lsa = LinearSweepAlgorithm()
-                for i in lsa.get_instructions(self.CM, self.size, self.insn,
-                                              self.idx):
-                    yield i
+            lsa = LinearSweepAlgorithm()
+            for i in lsa.get_instructions(self.CM, self.size, self.insn,
+                                          self.idx):
+                yield i
 
     def reload(self):
         pass
@@ -8118,14 +8111,14 @@ class DalvikVMFormat(bytecode._Bytecode):
             m_a = self.CM.get_vmanalysis().get_method_analysis(method)
             if m_a:
                 xrefs_from = m_a.get_xref_from()
-                for ref_class, ref_method in xrefs_from:
+                for ref_class, ref_method, _ in xrefs_from:
                     name = (bytecode.FormatNameToPython(ref_method.get_name()) +
                             "_" + bytecode.FormatDescriptorToPython(
                                 ref_method.get_descriptor()))
                     setattr(method.XF, name, ref_method)
 
                 xrefs_to = m_a.get_xref_to()
-                for ref_class, ref_method in xrefs_to:
+                for ref_class, ref_method, _ in xrefs_to:
                     name = (bytecode.FormatNameToPython(ref_method.get_name()) +
                             "_" + bytecode.FormatDescriptorToPython(
                                 ref_method.get_descriptor()))
@@ -8188,9 +8181,6 @@ class DalvikVMFormat(bytecode._Bytecode):
 
     def get_determineException(self):
         return determineException
-
-    def get_DVM_TOSTRING(self):
-        return DVM_TOSTRING()
 
     def set_decompiler(self, decompiler):
         self.CM.set_decompiler(decompiler)
@@ -8634,3 +8624,31 @@ def get_bytecodes_methodx(method, mx):
 
 class ExportObject(object):
     pass
+
+
+class ConstString(Instruction21c):
+  """Simulate a const-string instruction."""
+
+  def __init__(self, orig_ins, value):
+    self.OP = orig_ins.OP
+    self.AA = orig_ins.AA
+    self.BBBB = orig_ins.BBBB
+    self.cm = orig_ins.cm
+    self.value = value
+
+  def get_raw_string(self):
+    return self.value
+
+  def get_operands(self):
+    return [(0, 1), (257, 2113, "'%s'" % self.value)]
+
+
+class FakeNop(Instruction10x):
+  """Simulate a nop instruction."""
+
+  def __init__(self, length):
+    self.OP = 0x00
+    self.length = length
+
+  def get_length(self):
+    return self.length
