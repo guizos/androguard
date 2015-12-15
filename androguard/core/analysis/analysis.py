@@ -16,6 +16,7 @@
 # limitations under the License.
 
 import re, random, cPickle, collections
+from androguard.core import analysis
 
 from androguard.core.androconf import error, warning, debug, is_ascii_problem,\
     load_api_specific_resource_module
@@ -517,6 +518,147 @@ class MethodAnalysis(object):
       """
         return self.tags
 
+    def get_implicit_intents(self):
+        """
+          Returns a list of Broadcast Intents that which action is set inside this method. They might not be declared in this method.
+           The best moment to detect an intent is when its action is set.
+
+          :rtype: Intent
+        """
+        intents = []
+        for index,i in enumerate(self.get_method().get_instructions()):
+            if "Landroid/content/Intent;->setAction" in i.get_output() or "Landroid/content/Intent;-><init>(Ljava/lang/String" in i.get_output():
+                intent = i.get_output().split(",")[1].strip()
+                back_index = index
+                while back_index > 0:
+                    back_index -= 1
+                    i2 = self.get_method().get_instruction(back_index)
+                    if intent in i2.get_output() and i2.get_op_value() in [0xC] :#12 is move-result-object
+                        action = track_method_call_action(self.get_method(),back_index,intent)
+                        intent = IntentAnalysis(action.strip())
+                        intents.append(intent)
+                        back_index = -1
+                    if i2.get_op_value() == 0x1A and intent in i2.get_output(): #const-string
+                        action = i2.get_output().split(",")[1].strip()
+                        intent = IntentAnalysis(action[1:-1].strip())
+                        intents.append(intent)
+                        back_index = -1
+        return intents
+
+    def get_dynamic_receivers(self):
+        """
+          Returns a list of all the Receivers registered inside a method
+
+          :rtype: Receiver
+        """
+        receivers = []
+        for index,i in enumerate(self.get_method().get_instructions()):
+            if i.get_op_value()==0x22:
+                if "Landroid/content/IntentFilter" in i.get_output(): #we look for the registerReceiver method
+                    var = i.get_output().split(",")[0].strip() #The second argument holds the IntentFilter with the action
+                    action = track_intent_filter_direct(self.get_method(),index+1,var)
+                    intentfilter = IntentFilterAnalysis(action)
+                    filters = []
+                    filters.append(intentfilter)
+                    receiver = ReceiverAnalysis(filters)
+                    receivers.append(receiver)
+        return receivers
+
+    def get_shared_preferences_reads(self,apk):
+        shared_preferences = []
+        for index,i in enumerate(self.get_method().get_instructions()):
+            if "getSharedPreferences" in i.get_output():
+                if not self.is_create_package_context_present(index-1):
+                    new_var = ""
+                    if i.get_op_value() == 0x6E:
+                        new_var = i.get_output().split(",")[1].strip()
+                    elif i.get_op_value() == 0x74:
+                        new_var = i.get_output().split(",")[0].split("...")[1].strip()[1:]
+                        num = int(new_var)-1
+                        new_var = "v"+`num`
+                    pref_file = track_string_value(self.get_method(), index-1, new_var)
+                    package = apk.get_package()
+                    sharedprefs = SharedPreferencesAnalysis(package, pref_file,"read")
+                    shared_preferences.append(sharedprefs)
+            if "createPackageContext" in i.get_output():
+                    var = i.get_output().split(",")[2].strip()
+                    file_name = self.track_get_shared_preferences_direct(index+1, var)
+                    name_var = i.get_output().split(",")[1].strip()
+                    package = track_string_value(self.get_method(), index-1, name_var)
+                    sharedprefs = SharedPreferencesAnalysis(package, file_name,"read")
+                    shared_preferences.append(sharedprefs)
+        return shared_preferences
+
+    def get_shared_preferences_writes(self,apk):
+        shared_preferences = []
+        for index,i in enumerate(self.get_method().get_instructions()):
+            if "getSharedPreferences" in i.get_output():
+                if not self.is_create_package_context_present(index-1):
+                    if self.is_edit_present_later(index):
+                        new_var = ""
+                        if i.get_op_value() == 0x6E:
+                            new_var = i.get_output().split(",")[1].strip()
+                        elif i.get_op_value() == 0x74:
+                            new_var = i.get_output().split(",")[0].split("...")[1].strip()[1:]
+                            num = int(new_var)-1
+                            new_var = "v"+`num`
+                        pref_file = track_string_value(self.get_method(),index-1,new_var)
+                        package = apk.get_package()
+                        sharedprefs = SharedPreferencesAnalysis(str(package), pref_file,"write")
+                        shared_preferences.append(sharedprefs)
+            if "createPackageContext" in i.get_output():
+                if self.is_edit_present_later(index):
+                    var = i.get_output().split(",")[2].strip()
+                    file_name = self.track_get_shared_preferences_direct(index+1,var)
+                    name_var = i.get_output().split(",")[1].strip()
+                    package = track_string_value(self.get_method(),index-1,name_var)
+                    sharedprefs = SharedPreferencesAnalysis(str(package), file_name,"write")
+                    shared_preferences.append(sharedprefs)
+        return shared_preferences
+
+    def is_create_package_context_present(self, index):
+        while index >= 0:
+            ins = self.get_method().get_instruction(index)
+            if "createPackageContext" in ins.get_output():
+                return True
+            index -= 1
+        return None
+
+    def is_edit_present_later(self, index):
+        present = None
+        try:
+            while index < self.get_method().get_length():
+                ins = self.get_method().get_instruction(index)
+                if("android/content/SharedPreferences;->edit()" in ins.get_output()):
+                    return True
+                index = index + 1
+        except IndexError:
+            #Fail gently. beginning of the array reached
+            return None
+        return None
+
+    def track_get_shared_preferences_direct(self,index,variable):
+        action = ""
+        ins = self.get_method().get_instruction(index)
+        if ins.get_op_value() in [0x0C]:
+            variable = ins.get_output().split(",")[0].strip()
+            index += 1
+        try:
+            while index < self.get_method().get_length():
+                ins = self.get_method().get_instruction(index)
+                if variable in ins.get_output() and "getSharedPreferences" in ins.get_output():
+                    new_var = ins.get_output().split(",")[1].strip()
+                    action = track_string_value(self.get_method(), index-1, new_var)
+                    return action
+                elif variable in ins.get_output().split(",")[1].strip() and ins.get_op_value() in [0x07, 0x08]:
+                    # Move operation, we just need to track the new variable now.
+                    variable = ins.get_output().split(",")[0].strip()
+                index += 1
+        except IndexError:
+            return action
+        return action
+
+
 
 class StringAnalysis(object):
 
@@ -877,6 +1019,82 @@ class newVMAnalysis(object):
                 self.classes[current_class.get_name()] = ClassAnalysis(
                     current_class)
 
+    def get_implicit_intents(self, include_support=None):
+        intents = []
+        for vm in self.vms:
+            for vm_class in vm.get_classes():
+               if should_analyze(vm_class.get_name(),include_support):
+                    for m in vm_class.get_methods():
+                        intents.extend(self.get_method(m).get_implicit_intents())
+        return intents
+
+    def get_static_receivers(self, apk):
+        receivers = []
+        manifest = apk.get_AndroidManifest()
+        receiver_list = manifest.getElementsByTagName('receiver')
+        for receiver in receiver_list:
+            action_list = receiver.getElementsByTagName('action')
+            for action in action_list:
+                values = action.attributes.values()
+                for val in values:
+                    if 'name' in val.name:
+                        intentfilter = IntentFilterAnalysis(str(val.value))
+                        filters = [intentfilter]
+                        receiver = ReceiverAnalysis(filters)
+                        receivers.append(receiver)
+        activity_list = manifest.getElementsByTagName('activity')
+        for activity in activity_list:
+            action_list = activity.getElementsByTagName('action')
+            for action in action_list:
+                values = action.attributes.values()
+                for val in values:
+                    if 'name' in val.name:
+                        intentfilter = IntentFilterAnalysis(str(val.value))
+                        filters = [intentfilter]
+                        receiver = ReceiverAnalysis(filters)
+                        receivers.append(receiver)
+        return receivers
+
+    #TODO review android support library detection. Sometimes it doesn't match properly.
+    def get_dynamic_receivers(self,include_support=None):
+        intents = []
+        for vm in self.vms:
+            for vm_class in vm.get_classes():
+                if should_analyze(vm_class.get_name(), include_support):
+                    for m in vm_class.get_methods():
+                        intents.extend(self.get_method(m).get_dynamic_receivers())
+        return intents
+
+    def get_shared_preferences_reads(self,apk,include_support=None):
+        shared_prefs = []
+        for vm in self.vms:
+            for vm_class in vm.get_classes():
+                if should_analyze(vm_class.get_name(),include_support):
+                    for m in vm_class.get_methods():
+                        shared_prefs.extend(self.get_method(m).get_shared_preferences_reads(apk))
+        return shared_prefs
+
+    def get_shared_preferences_writes(self,apk,include_support=None):
+        shared_prefs = []
+        for vm in self.vms:
+            for vm_class in vm.get_classes():
+                if should_analyze(vm_class.get_name(),include_support):
+                    for m in vm_class.get_methods():
+                        shared_prefs.extend(self.get_method(m).get_shared_preferences_writes(apk))
+        return shared_prefs
+
+
+def should_analyze(class_name,include_support=None):
+    if include_support:
+        return True
+    elif 'Landroid/support' in class_name:
+        return None
+    elif 'Ljavassist' in class_name:
+        return None
+    else:
+        return True
+
+
 def is_ascii_obfuscation(vm):
     for classe in vm.get_classes():
         if is_ascii_problem(classe.get_name()):
@@ -885,3 +1103,156 @@ def is_ascii_obfuscation(vm):
             if is_ascii_problem(method.get_name()):
                 return True
     return False
+
+def track_intent_filter_direct(method,index,variable):
+    """
+        Tracks the value of the IntentFilter action
+    :param method: is the method where we are searching
+    :param index: is the next instruction after the declaration of the IntentFilter has been found
+    :param variable: is the register name where the IntentFilter is placed
+    :return:
+    """
+    action = "notDefinedInMethod"
+    try:
+        while index < method.get_length():
+            ins = method.get_instruction(index)
+            if variable in ins.get_output() and "Landroid/content/IntentFilter;-><init>(Ljava/lang/String;" in ins.get_output():
+                new_var = ins.get_output().split(",")[1].strip()
+                action = track_string_value(method,index-1,new_var)
+                return action
+            elif (variable in ins.get_output().split(",")[1].strip() and ins.get_op_value() in [0x07, 0x08]):
+                # Move operation, we just need to track the new variable now.
+                new_var = ins.get_output().split(",")[0].strip()
+                #print "++++"+new_var
+                action2 = track_intent_filter_direct(method,index+1,new_var)
+                if(action2 not in ["notDefinedInMethod", "registerReceiver"]):# it may happen that the same variable is referenced in two register. One leads to nowehere and the other is the correct one.
+                    action = action2
+                    return action
+            elif (variable in ins.get_output().split(",")[0].strip() and "Landroid/content/IntentFilter;-><init>(Landroid/content/IntentFilter;" in ins.get_output()):
+                # The intent filter is initialized with other intent filter.
+                # We update the register name to look for.
+                #TODO THIS GENERATES FALSE POSITIVES
+                new_var = ins.get_output().split(",")[1].strip()
+                action2 = track_intent_filter_direct(method,index+1,new_var)
+                if(action2 not in ["notDefinedInMethod", "registerReceiver"]):# it may happen that the same variable is referenced in two register. One leads to nowehere and the other is the correct one.
+                    action = action2
+                    return action
+            elif (variable in ins.get_output() and "addAction" in ins.get_output()):
+                # There is an addAction that declares the action
+                # We need to look for its value
+                new_var = ins.get_output().split(",")[1].strip()
+                if "p" in new_var:# the varaible comes from a method parameter
+                    action = "MethodParameter"
+                    return action
+                else:
+                    action = track_string_value(method,index-1,new_var)
+                    return action
+            elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x54]):#taking value from a method call.
+                action = ins.get_output().split(",")[2].strip()
+                return action
+            elif "registerReceiver" in ins.get_output():
+                action = "registerReceiverFoundWithouBeingAbleToTrackParameters"
+                return action
+            index = index + 1
+    except IndexError:
+        #Fail gently. beginning of the array reached
+        return action
+    return action
+
+def track_string_value(method,index,variable):
+    """
+        Tracks back the value of a string variable that has been declared in code
+        If the value comes from a literal string, it returns it.
+        If the valua cannot be traced back to a literal string, it returns the chain
+        of method calls that resulted in that string until initialization of the object
+    :param method: is the method where we are searching
+    :param index: is the next instruction after the declaration of the IntentFilter has been found
+    :param variable: is the register name where the IntentFilter is placed
+    :return:
+    """
+    action = "NotTracedBackPossibleParameter"
+    while index >= 0:
+        ins = method.get_instruction(index)
+        #print "1---"+ins.get_output()
+        if (variable in ins.get_output() and ins.get_op_value() in [0x1A]):#0x1A is const-string
+            action = ins.get_output().split(",")[1].strip()
+            return action[1:-1]
+        elif (variable in ins.get_output() and ins.get_op_value() in [12] ):#12 is move-result-object
+            ins2 = method.get_instruction(index-1)
+            #print "2---"+ins2.get_name()+" "+ins.get_output()
+            if(len(ins2.get_output().split(","))==2):
+                action = ins2.get_output().split(",")[1] + action
+            elif len(ins2.get_output().split(","))==3 and variable == ins2.get_output().split(",")[0]:
+                action = ins2.get_output().split(",")[2] + action
+        elif variable in ins.get_output() and ins.get_name()=="new-instance":
+            # The register might being reused in another variable after this instruction
+            # Stop here
+            index = -1
+            action = ins.get_output().split(",")[1] + action
+        elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x07, 0x08]):
+            # Move operation, we just need to track the new variable now.
+            variable = ins.get_output().split(",")[1].strip()
+        elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x54]):#taking value from a method call.
+            action = ins.get_output().split(",")[2].strip()
+            instance_name = ins.get_output().split(",")[2].strip()
+            action = look_for_put_of_string_instance(method,instance_name)
+            index = -1
+        index = index - 1
+    return action
+
+def look_for_put_of_string_instance(method, instance_name):
+    for m in method.CM.vm.get_methods():
+        for index,i in enumerate(m.get_instructions()):
+            if( i.get_op_value() in [0x5B] and instance_name in i.get_output()):#iput
+                 string_var = i.get_output().split(",")[0].strip()
+                 return track_string_value(m,index,string_var)
+    return instance_name
+
+def track_method_call_action(method, index, intent_variable):
+    action = ""
+    while index > 0:
+        ins = method.get_instruction(index)
+        #print "1---"+ins.get_name()+" "+ins.get_output()
+        if (intent_variable in ins.get_output() and ins.get_op_value() in [12] ):#12 is move-result-object
+            ins2 = method.get_instruction(index-1)
+            #print "2---"+ins2.get_name()+" "+ins.get_output()
+            if len(ins2.get_output().split(","))==2:
+                action = ins2.get_output().split(",")[1] + action
+            elif len(ins2.get_output().split(","))==3 and intent_variable == ins2.get_output().split(",")[0]:
+                action = ins2.get_output().split(",")[2] + action
+        elif intent_variable in ins.get_output() and ins.get_name()=="new-instance":
+            index = 0
+            action = ins.get_output().split(",")[1] + action
+        index -= 1
+    return action
+
+#TODO add documentation about these
+class IntentAnalysis(object):
+
+    def __init__(self, action):
+        if action == "":
+            action = "NotTraceable"
+        self.action = action
+
+
+class ReceiverAnalysis(object):
+
+    def __init__(self, filters):
+        self.filters = filters
+
+    def get_action(self):
+        for f in self.filters:
+            return f.action
+
+
+class IntentFilterAnalysis(object):
+
+    def __init__(self, action):
+        self.action = action
+
+class SharedPreferencesAnalysis(object):
+
+    def __init__(self,package,preference_file, operation):
+        self.package = package
+        self.preference_file = preference_file
+        self.operation = operation

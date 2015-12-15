@@ -3133,173 +3133,11 @@ class EncodedMethod(object):
     def get_size(self):
         return len(self.get_raw())
 
-    def get_broadcast_intents(self):
-        """
-          Returns a list of Broadcast Intents that which action is set inside this method. They might not be declared in this method.
-           The best moment to detect an intent is when its action is set.
 
-          :rtype: Intent
-        """
-        intents = []
-        for index,i in enumerate(self.get_instructions()):
-            if i.get_op_value() == 0x6E: #invoke-virtual
-                if "Landroid/content/Intent;->setAction" in i.get_output():
-                    intent = i.get_output().split(",")[1].strip()
-                    back_index = index
-                    while back_index > 0:
-                        back_index -= 1
-                        i2 = self.get_instruction(back_index)
-                        if intent in i2.get_output() and i2.get_op_value() in [0xC] :#12 is move-result-object
-                            action = track_method_call_action(self,back_index,intent)
-                            intent = Intent(action)
-                            intents.append(intent)
-                            back_index = -1
-                        if i2.get_op_value() == 0x1A and intent in i2.get_output(): #const-string
-                            action = i2.get_output().split(",")[1].strip()
-                            intent = Intent(action[1:-1])
-                            intents.append(intent)
-                            back_index = -1
-        return intents
 
-    def get_dynamic_receivers(self):
-        """
-          Returns a list of all the Receivers registered inside a method
 
-          :rtype: Receiver
-        """
-        receivers = []
-        for index,i in enumerate(self.get_instructions()):
-            if i.get_op_value()==0x22:
-                if "Landroid/content/IntentFilter" in i.get_output(): #we look for the registerReceiver method
-                    var = i.get_output().split(",")[0].strip() #The second argument holds the IntentFilter with the action
-                    action = track_intent_filter_direct(m,index+1,var)
-                    intentfilter = IntentFilter(action)
-                    receiver = Receiver(intentfilter)
-                    receivers.append(receiver)
-        return receivers
 
-def track_intent_filter_direct(method,index,variable):
-    """
-        Tracks the value of the IntentFilter action
-    :param method: is the method where we are searching
-    :param index: is the next instruction after the declaration of the IntentFilter has been found
-    :param variable: is the register name where the IntentFilter is placed
-    :return:
-    """
-    action = "notDefinedInMethod"
-    try:
-        while index < method.get_length():
-            ins = method.get_instruction(index)
-            if variable in ins.get_output() and "Landroid/content/IntentFilter;-><init>(Ljava/lang/String;" in ins.get_output():
-                new_var = ins.get_output().split(",")[1].strip()
-                #TODO Look for a place to put the acid utils. A candidate is the analysis.py inside analysis.
-                action = track_string_value(method,index-1,new_var)
-                return action
-            elif (variable in ins.get_output().split(",")[1].strip() and ins.get_op_value() in [0x07, 0x08]):
-                # Move operation, we just need to track the new variable now.
-                new_var = ins.get_output().split(",")[0].strip()
-                #print "++++"+new_var
-                action2 = track_intent_filter_direct(method,index+1,new_var)
-                if(action2 not in ["notDefinedInMethod", "registerReceiver"]):# it may happen that the same variable is referenced in two register. One leads to nowehere and the other is the correct one.
-                    action = action2
-                    return action
-            elif (variable in ins.get_output().split(",")[0].strip() and "Landroid/content/IntentFilter;-><init>(Landroid/content/IntentFilter;" in ins.get_output()):
-                # The intent filter is initialized with other intent filter.
-                # We update the register name to look for.
-                #TODO THIS GENERATES FALSE POSITIVES
-                new_var = ins.get_output().split(",")[1].strip()
-                action2 = track_intent_filter_direct(method,index+1,new_var)
-                if(action2 not in ["notDefinedInMethod", "registerReceiver"]):# it may happen that the same variable is referenced in two register. One leads to nowehere and the other is the correct one.
-                    action = action2
-                    return action
-            elif (variable in ins.get_output() and "addAction" in ins.get_output()):
-                # There is an addAction that declares the action
-                # We need to look for its value
-                new_var = ins.get_output().split(",")[1].strip()
-                if "p" in new_var:# the varaible comes from a method parameter
-                    action = "MethodParameter"
-                    return action
-                else:
-                    action = track_string_value(method,index-1,new_var)
-                    return action
-            elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x54]):#taking value from a method call.
-                action = "got it from method call:"+ins.get_output().split(",")[2].strip()
-                return action
-            elif "registerReceiver" in ins.get_output():
-                action = "registerReceiverFoundWithouBeingAbleToTrackParameters"
-                return action
-            index = index + 1
-    except IndexError:
-        #Fail gently. beginning of the array reached
-        return action
-    return action
 
-def track_string_value(method,index,variable):
-    """
-        Tracks back the value of a string variable that has been declared in code
-        If the value comes from a literal string, it returns it.
-        If the valua cannot be traced back to a literal string, it returns the chain
-        of method calls that resulted in that string until initialization of the object
-    :param method: is the method where we are searching
-    :param index: is the next instruction after the declaration of the IntentFilter has been found
-    :param variable: is the register name where the IntentFilter is placed
-    :return:
-    """
-    action = "NotTracedBackPossibleParameter"
-    while index >= 0:
-        ins = method.get_instruction(index)
-        #print "1---"+ins.get_output()
-        if (variable in ins.get_output() and ins.get_op_value() in [0x1A]):#0x1A is const-string
-            action = ins.get_output().split(",")[1].strip()
-            return action[1:-1]
-        elif (variable in ins.get_output() and ins.get_op_value() in [12] ):#12 is move-result-object
-            ins2 = method.get_instruction(index-1)
-            #print "2---"+ins2.get_name()+" "+ins.get_output()
-            if(len(ins2.get_output().split(","))==2):
-                action = ins2.get_output().split(",")[1] + action
-            elif len(ins2.get_output().split(","))==3 and variable == ins2.get_output().split(",")[0]:
-                action = ins2.get_output().split(",")[2] + action
-        elif variable in ins.get_output() and ins.get_name()=="new-instance":
-            # The register might being reused in another variable after this instruction
-            # Stop here
-            index = -1
-            action = ins.get_output().split(",")[1] + action
-        elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x07, 0x08]):
-            # Move operation, we just need to track the new variable now.
-            variable = ins.get_output().split(",")[1].strip()
-        elif (variable in ins.get_output().split(",")[0].strip() and ins.get_op_value() in [0x54]):#taking value from a method call.
-            action = "got it from method call:"+ins.get_output().split(",")[2].strip()
-            instance_name = ins.get_output().split(",")[2].strip()
-            action = look_for_put_of_string_instance(method,instance_name)
-            index = -1
-        index = index - 1
-    return action
-
-def look_for_put_of_string_instance(method, instance_name):
-    for m in method.CM.vm.get_methods():
-        for index,i in enumerate(m.get_instructions()):
-            if( i.get_op_value() in [0x5B] and instance_name in i.get_output()):#iput
-                 string_var = i.get_output().split(",")[0].strip()
-                 return track_string_value(m,index,string_var)
-    return instance_name
-
-def track_method_call_action(method, index, intent_variable):
-    action = ""
-    while index > 0:
-        ins = method.get_instruction(index)
-        #print "1---"+ins.get_name()+" "+ins.get_output()
-        if (intent_variable in ins.get_output() and ins.get_op_value() in [12] ):#12 is move-result-object
-            ins2 = method.get_instruction(index-1)
-            #print "2---"+ins2.get_name()+" "+ins.get_output()
-            if len(ins2.get_output().split(","))==2:
-                action = ins2.get_output().split(",")[1] + action
-            elif len(ins2.get_output().split(","))==3 and intent_variable == ins2.get_output().split(",")[0]:
-                action = ins2.get_output().split(",")[2] + action
-        elif intent_variable in ins.get_output() and ins.get_name()=="new-instance":
-            index = 0
-            action = ins.get_output().split(",")[1] + action
-        index -= 1
-    return action
 
 class ClassDataItem(object):
     """
@@ -8571,11 +8409,7 @@ class DalvikVMFormat(bytecode._Bytecode):
 
         return escape_fct(str(operand[1]))
 
-    def get_broadcast_intents(self):
-        intents = []
-        for m in self.get_methods():
-            intents.extend(m.get_broadcast_intents())
-        return intents
+
 
 
 class OdexHeaderItem(object):
@@ -8829,20 +8663,3 @@ class FakeNop(Instruction10x):
     return self.length
 
 
-#TODO add documentation about these
-class Intent(object):
-
-    def __init__(self, action):
-        self.action = action
-
-
-class Receiver(object):
-
-    def __init__(self, filters):
-        self.filters = filters
-
-
-class IntentFilter(object):
-
-    def __init__(self, action):
-        self.action = action
